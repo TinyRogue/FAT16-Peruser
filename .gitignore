@@ -1,0 +1,19 @@
+#MacOS stuff
+.DS_Store
+
+#Project configuration file for tests and IDE metafiles
+CMakeLists.txt
+makefile
+cmake-build-debug/*
+.idea/*
+
+#Files and disk images for testing purpose
+rdebug.*
+tested_declarations.h
+unit_helper_v2.*
+unit_test_v2.c
+Disk-Images/*
+
+#Resource file for writing this project
+#Can be found at: https://www.analog.com/media/en/technical-documentation/application-notes/ee_329_rev1.pdf
+FAT16_info.pdf
