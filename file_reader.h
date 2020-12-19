@@ -21,7 +21,7 @@
 
 #define LOG_ERROR(str)                                                                        \
     fprintf(stderr, "%s, error code %d ('%s'), in line '%d', in func '%s', in file: '%s'\n",  \
-        str, errno, strerror(errno), __LINE__, __FUNCTION__, __FILE__);                       \
+        str, errno, strerror(errno), __LINE__, __func__, __FILE__);                           \
 
 
 typedef uint32_t lba_t;
@@ -122,7 +122,9 @@ int fat_close(struct volume_t* pvolume);
 
 
 struct file_t {
-
+    //TODO: TO DELETE
+    int a;
+    //END OF DELETE
 } __attribute__((packed));
 
 struct file_t* file_open(struct volume_t* pvolume, const char* file_name);
@@ -132,7 +134,9 @@ int32_t file_seek(struct file_t* stream, int32_t offset, int whence);
 
 
 struct dir_t {
-
+//TODO: TO DELETE
+    int a;
+    //END OF DELETE
 } __attribute__((packed));
 
 
