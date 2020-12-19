@@ -1,14 +1,31 @@
 #ifndef FILE_READER
 #define FILE_READER
 
-#include <stdint.h>     /* For (u)int(*)_t types */
-#include <stdbool.h>    /* For bool type */
-#include <errno.h>      /* For ERRNO and constants */
-#include <stdio.h>      /* For size_t, perror, printf */
+#include <stdio.h>      /* For size_t, perror(), printf(), fprintf()    */
+#include <stdlib.h>     /* For malloc() and its family                  */
+#include <stdint.h>     /* For (u)int(*)_t types                        */
+#include <stdbool.h>    /* For bool type                                */
+
+#include <errno.h>      /* For ERRNO and constants                      */
+#include <string.h>     /* For strerror()                               */
+
+#include <fcntl.h>      /* For open()                                   */
+#include <sys/stat.h>   /* For struct stat                              */
+#include <sys/mman.h>   /* For mmap()                                   */
+#include <unistd.h>     /* For close()                                  */
+
 
 #define SECTOR_SIZE 0x200
-#define SIGNATURE_VALUE 0xAA55
+#define SECTOR_END_MARKER_VALUE 0xAA55
+#define SIGNATURE_VALUE 0x29
 
+#define LOG_ERROR(str)                                                                        \
+    fprintf(stderr, "%s, error code %d ('%s'), in line '%d', in func '%s', in file: '%s'\n",  \
+        str, errno, strerror(errno), __LINE__, __FUNCTION__, __FILE__);                       \
+
+
+typedef uint32_t lba_t;
+typedef uint32_t cluster_t;
 
 typedef enum {READ_ONLY = 0x01, HIDDEN_FILE = 0x02, SYSTEM_FILE = 0x04,
               VOLUME_LABEL = 0x08, LONG_FILE_NAME = 0x0f, DIRECTORY = 0x10,
@@ -44,7 +61,7 @@ typedef struct VBR_t {
     } __attribute__((packed));
 
     uint8_t boot_code[448];
-    uint16_t sector_marker_end;
+    uint16_t sector_end_marker;
 } __attribute__((packed)) VBR_t;
 
 
@@ -80,7 +97,8 @@ typedef struct FAT_file_t {
 
 
 struct disk_t {
-
+    VBR_t *VBR;
+    FILE *disk_file;
 } __attribute__((packed));
 
 struct disk_t* disk_open_from_file(const char* volume_file_name);
@@ -89,7 +107,13 @@ int disk_close(struct disk_t* pdisk);
 
 
 struct volume_t {
-
+    lba_t volume_start;
+    lba_t FAT1_start;
+    lba_t FAT2_start;
+    lba_t root_start;
+    lba_t sectors_per_root;
+    lba_t data_start;
+    uint32_t fat_entry_count; //available_clusters + 2
 } __attribute__((packed));
 
 
