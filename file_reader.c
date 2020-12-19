@@ -2,9 +2,9 @@
 
 
 
-static lba_t calc_cluster_offset(lba_t data_start, uint8_t sectors_per_cluster, uint64_t n) {
-    return data_start + (n - 2) * sectors_per_cluster;
-}
+//static lba_t calc_cluster_offset(lba_t data_start, uint8_t sectors_per_cluster, uint64_t n) {
+//    return data_start + (n - 2) * sectors_per_cluster;
+//}
 
 //static lba_t available_clusters(struct disk_t *disk) {
 //    uint32_t logical_sectors = disk->VBR->small_sectors == 0 ? disk->VBR->large_sectors : disk->VBR->small_sectors;
@@ -33,6 +33,7 @@ static bool is_VBR_valid(VBR_t *VBR) {
 
 
 struct disk_t* disk_open_from_file(const char* volume_file_name) {
+
     if (!volume_file_name) {
         errno = EFAULT;
         LOG_ERROR("Pointer is NULL")
@@ -46,7 +47,7 @@ struct disk_t* disk_open_from_file(const char* volume_file_name) {
         return NULL;
     }
 
-    disk->VBR = (struct VBR_t*)calloc(sizeof(struct VBR_t), 1);
+    disk->VBR = (struct VBR_t*)calloc(1, sizeof(struct VBR_t));
     if (!disk->VBR) {
         free(disk);
         errno = ENOMEM;
@@ -63,12 +64,10 @@ struct disk_t* disk_open_from_file(const char* volume_file_name) {
         return NULL;
     }
 
-    if (!disk_read(disk, 0, disk->VBR, 1)) {
+    if (disk_read(disk, 0, disk->VBR, 1) == -1) {
         free(disk->VBR);
         fclose(disk->disk_file);
         free(disk);
-        errno = ENOENT;
-        LOG_ERROR("Could not read from file");
         return NULL;
     }
 
