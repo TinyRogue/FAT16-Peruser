@@ -29,7 +29,8 @@ typedef uint32_t cluster_t;
 
 typedef enum {READ_ONLY = 0x01, HIDDEN_FILE = 0x02, SYSTEM_FILE = 0x04,
               VOLUME_LABEL = 0x08, LONG_FILE_NAME = 0x0f, DIRECTORY = 0x10,
-              ARCHIVE = 0x20, LFN = READ_ONLY | HIDDEN_FILE | SYSTEM_FILE | VOLUME_LABEL} dir_attributes;
+              ARCHIVE = 0x20, LFN = READ_ONLY | HIDDEN_FILE | SYSTEM_FILE | VOLUME_LABEL} __attribute__((packed))
+              dir_attributes;
 
 
 typedef struct VBR_t {
@@ -65,16 +66,17 @@ typedef struct VBR_t {
 } __attribute__((packed)) VBR_t;
 
 
-typedef struct FAT_file_t {
+typedef struct file_entry_t {
     union {
         struct {
             uint8_t filename[8];
             uint8_t extension[3];
         };
+        uint8_t fullname[8 + 3];
         uint8_t allocation_status;
     };
 
-    uint8_t attributes;
+    dir_attributes attributes;
     uint8_t reserved;
 
     struct creation_time {
@@ -93,7 +95,7 @@ typedef struct FAT_file_t {
 
     uint16_t first_cluster_address_low_order;
     uint32_t file_size;
-} __attribute__((packed)) FAT_file_t;
+} __attribute__((packed)) Entry_t;
 
 
 struct disk_t {
@@ -107,13 +109,10 @@ int disk_close(struct disk_t* pdisk);
 
 
 struct volume_t {
+    struct disk_t *disk;
     lba_t volume_start;
-    lba_t FAT1_start;
-    lba_t FAT2_start;
-    lba_t root_start;
-    lba_t sectors_per_root;
-    lba_t data_start;
-    uint32_t fat_entry_count; //available_clusters + 2
+    uint8_t **FATs_mem;
+    Entry_t *root_dir_entries;
 } __attribute__((packed));
 
 
@@ -122,9 +121,6 @@ int fat_close(struct volume_t* pvolume);
 
 
 struct file_t {
-    //TODO: TO DELETE
-    int a;
-    //END OF DELETE
 } __attribute__((packed));
 
 struct file_t* file_open(struct volume_t* pvolume, const char* file_name);
@@ -134,21 +130,18 @@ int32_t file_seek(struct file_t* stream, int32_t offset, int whence);
 
 
 struct dir_t {
-//TODO: TO DELETE
-    int a;
-    //END OF DELETE
 } __attribute__((packed));
 
 
 struct dir_entry_t {
-    char* name;
+    char *name;
     size_t size;
     bool is_archived;
     bool is_readonly;
     bool is_system;
     bool is_hidden;
     bool is_directory;
-} __attribute__((packed));
+};
 
 struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path);
 int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry);
