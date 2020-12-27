@@ -1,23 +1,31 @@
 #ifndef FILE_READER
 #define FILE_READER
 
-#include <stdio.h>      /* For size_t, perror(), printf(), fprintf()    */
-#include <stdlib.h>     /* For malloc() and its family                  */
-#include <stdint.h>     /* For (u)int(*)_t types                        */
-#include <stdbool.h>    /* For bool type                                */
+#include <stdio.h>      /* For size_t, perror(), printf(), fprintf(), f* family for files       */
+#include <stdlib.h>     /* For malloc() and its family                                          */
+#include <stdint.h>     /* For (u)int(*)_t types                                                */
+#include <stdbool.h>    /* For bool type                                                        */
 
-#include <errno.h>      /* For ERRNO and constants                      */
-#include <string.h>     /* For strerror()                               */
-
-#include <fcntl.h>      /* For open()                                   */
-#include <sys/stat.h>   /* For struct stat                              */
-#include <sys/mman.h>   /* For mmap()                                   */
-#include <unistd.h>     /* For close()                                  */
+#include <errno.h>      /* For ERRNO and constants                                              */
+#include <string.h>     /* For strerror(), memcmp()                                             */
 
 
 #define SECTOR_SIZE 0x200
 #define SECTOR_END_MARKER_VALUE 0xAA55
 #define SIGNATURE_VALUE 0x29
+
+#define MAX_ENTRIES_AMOUNT 512
+#define FILENAME_LEN 8
+#define EXTENSION_LEN 3
+#define FULL_FILENAME_LEN (FILENAME_LEN + EXTENSION_LEN + 1)
+
+#define DELETED 0xE5
+
+#define EOC_MARKER_LOW_BOUNDARY 0xFFF8
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
 
 #define LOG_ERROR(str)                                                                        \
     fprintf(stderr, "%s, error code %d ('%s'), in line '%d', in func '%s', in file: '%s'\n",  \
@@ -69,10 +77,9 @@ typedef struct VBR_t {
 typedef struct file_entry_t {
     union {
         struct {
-            uint8_t filename[8];
-            uint8_t extension[3];
+            uint8_t filename[FILENAME_LEN];
+            uint8_t extension[EXTENSION_LEN];
         };
-        uint8_t fullname[8 + 3];
         uint8_t allocation_status;
     };
 
@@ -103,30 +110,26 @@ struct disk_t {
     FILE *disk_file;
 } __attribute__((packed));
 
-struct disk_t* disk_open_from_file(const char* volume_file_name);
-int disk_read(struct disk_t* pdisk, int32_t first_sector, void* buffer, int32_t sectors_to_read);
-int disk_close(struct disk_t* pdisk);
-
 
 struct volume_t {
     struct disk_t *disk;
     lba_t volume_start;
-    uint8_t **FATs_mem;
+    lba_t user_data_pos;
+    uint16_t *FAT_mem;
     Entry_t *root_dir_entries;
+    uint16_t entries_amount;
+    uint16_t eoc_marker;
 } __attribute__((packed));
-
-
-struct volume_t* fat_open(struct disk_t* pdisk, uint32_t first_sector);
-int fat_close(struct volume_t* pvolume);
 
 
 struct file_t {
+    Entry_t *entry;
+    size_t offset;
+    size_t size;
+    bool is_open;
+    cluster_t start_of_chain;
+    struct volume_t *in_volume;
 } __attribute__((packed));
-
-struct file_t* file_open(struct volume_t* pvolume, const char* file_name);
-int file_close(struct file_t* stream);
-size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream);
-int32_t file_seek(struct file_t* stream, int32_t offset, int whence);
 
 
 struct dir_t {
@@ -142,6 +145,18 @@ struct dir_entry_t {
     bool is_hidden;
     bool is_directory;
 };
+
+struct disk_t* disk_open_from_file(const char* volume_file_name);
+int disk_read(struct disk_t* pdisk, int32_t first_sector, void* buffer, int32_t sectors_to_read);
+int disk_close(struct disk_t* pdisk);
+
+struct volume_t* fat_open(struct disk_t* pdisk, uint32_t first_sector);
+int fat_close(struct volume_t* pvolume);
+
+struct file_t* file_open(struct volume_t* pvolume, const char* file_name);
+int file_close(struct file_t* stream);
+size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream);
+int32_t file_seek(struct file_t* stream, int32_t offset, int whence);
 
 struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path);
 int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry);
