@@ -94,9 +94,10 @@ static bool is_VBR_valid(const VBR_t* const VBR) {
     if (!(VBR->small_sectors == 0 ^ VBR->large_sectors == 0)) return false;
     if (VBR->small_sectors == 0 && VBR->large_sectors < 65536) return false;
 
+
     uint8_t _counter = 0;
-    uint8_t _aval_sectors_per_cluster[] = {1, 2, 4, 8, 16, 32, 64, 128};
-    uint8_t _length = sizeof(_aval_sectors_per_cluster) / sizeof(*_aval_sectors_per_cluster);
+    const uint8_t _aval_sectors_per_cluster[] = {1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8_t _length = sizeof(_aval_sectors_per_cluster) / sizeof(*_aval_sectors_per_cluster);
     for (; _counter < _length ; _counter++) {
         if (VBR->sectors_per_cluster == _aval_sectors_per_cluster[_counter]) break;
     }
@@ -109,20 +110,21 @@ static bool is_VBR_valid(const VBR_t* const VBR) {
 static bool load_FATs(struct volume_t* const volume) {
 
     //Allocate memory for FATs ptr
-    volume->FATs_mem = (uint8_t**)calloc(volume->disk->VBR->FATs, sizeof(uint8_t*));
-    if (!volume->FATs_mem) {
+
+    uint8_t **FATs_handler = (uint8_t**)calloc(volume->disk->VBR->FATs, sizeof(uint8_t*));
+    if (!FATs_handler) {
         errno = ENOMEM;
         LOG_ERROR("Not enough memory");
         return false;
     }
 
-    lba_t FAT_memory_size = volume->disk->VBR->sectors_per_FAT * volume->disk->VBR->bytes_per_sector;
+    const lba_t FAT_memory_size = volume->disk->VBR->sectors_per_FAT * volume->disk->VBR->bytes_per_sector;
     //Allocate memory for FATs
     for (int i = 0; i < volume->disk->VBR->FATs; i++) {
-        volume->FATs_mem[i] = (uint8_t*)calloc(1, FAT_memory_size);
-        if (!volume->FATs_mem[i]) {
+        FATs_handler[i] = (uint8_t*)calloc(1, FAT_memory_size);
+        if (!FATs_handler[i]) {
             for (int j = 0; j < i; j++) {
-                free(volume->FATs_mem[i]);
+                free(FATs_handler[i]);
             }
             errno = ENOMEM;
             LOG_ERROR("Not enough memory");
@@ -130,17 +132,17 @@ static bool load_FATs(struct volume_t* const volume) {
         }
     }
 
-    //Load memory into FATs
+    //Load data into FATs
     for (int i = 0; i < volume->disk->VBR->FATs; i++) {
 
-        lba_t fat_position = volume->volume_start + volume->disk->VBR->reserved_sectors + volume->disk->VBR->sectors_per_FAT * i;
-        int32_t sectors_read = disk_read(volume->disk, fat_position, volume->FATs_mem[i], volume->disk->VBR->sectors_per_FAT);
+        const lba_t fat_position = volume->volume_start + volume->disk->VBR->reserved_sectors + volume->disk->VBR->sectors_per_FAT * i;
+        const int32_t sectors_read = disk_read(volume->disk, fat_position, FATs_handler[i], volume->disk->VBR->sectors_per_FAT);
 
         if (sectors_read != volume->disk->VBR->sectors_per_FAT) {
             errno = ERANGE;
             LOG_ERROR("Couldn't read FATs");
             for (int j = 0; j < volume->disk->VBR->FATs; j++) {
-                free(volume->FATs_mem[j]);
+                free(FATs_handler[j]);
             }
             return false;
         }
@@ -148,14 +150,39 @@ static bool load_FATs(struct volume_t* const volume) {
 
     //Validate FATs
     for (int i = 1; i < volume->disk->VBR->FATs; i++) {
-        if (memcmp(volume->FATs_mem[i - 1], volume->FATs_mem[i], FAT_memory_size) != 0) {
+        if (memcmp(FATs_handler[i - 1], FATs_handler[i], FAT_memory_size) != 0) {
             errno = EINVAL;
             LOG_ERROR("FATs damaged");
             for (int j = 0; j < volume->disk->VBR->FATs; j++) {
-                free(volume->FATs_mem[j]);
+                free(FATs_handler[j]);
             }
             return false;
         }
+    }
+
+    //Load FAT16 into struct memory
+    volume->FAT_mem = (uint16_t*)calloc(1, FAT_memory_size);
+    if (!volume->FAT_mem) {
+        for (int i = 0; i < volume->disk->VBR->FATs; i++) {
+            free(FATs_handler[i]);
+        }
+        errno = ENOMEM;
+        LOG_ERROR("Not enough memory");
+        return false;
+    }
+
+    memcpy(volume->FAT_mem, FATs_handler[0], FAT_memory_size);
+
+    for (int i = 0; i < volume->disk->VBR->FATs; i++) {
+        free(FATs_handler[i]);
+    }
+
+    volume->eoc_marker = volume->FAT_mem[1];
+    if (volume->eoc_marker < EOC_MARKER_LOW_BOUNDARY) {
+        errno = EINVAL;
+        LOG_ERROR("EOC damaged");
+        free(volume->FAT_mem);
+        return false;
     }
 
     return true;
@@ -163,12 +190,12 @@ static bool load_FATs(struct volume_t* const volume) {
 
 
 static bool load_root_dir(struct volume_t* const volume) {
-    lba_t root_dir_pos = volume->volume_start + volume->disk->VBR->reserved_sectors + volume->disk->VBR->FATs * volume->disk->VBR->sectors_per_FAT;
+    const lba_t root_dir_pos = volume->volume_start + volume->disk->VBR->reserved_sectors + volume->disk->VBR->FATs * volume->disk->VBR->sectors_per_FAT;
 
     lba_t root_dir_size = (volume->disk->VBR->root_entries * sizeof(Entry_t)) / volume->disk->VBR->bytes_per_sector;
     root_dir_size += ((volume->disk->VBR->root_entries * sizeof(Entry_t)) % volume->disk->VBR->bytes_per_sector) != 0;
 
-    size_t root_dir_bytes = root_dir_size * volume->disk->VBR->bytes_per_sector;
+    const size_t root_dir_bytes = root_dir_size * volume->disk->VBR->bytes_per_sector;
 
     volume->root_dir_entries = (Entry_t *)calloc(1, root_dir_bytes);
     if (!volume->root_dir_entries) {
@@ -177,7 +204,7 @@ static bool load_root_dir(struct volume_t* const volume) {
         return false;
     }
 
-    int32_t read_blocks = disk_read(volume->disk, root_dir_pos, volume->root_dir_entries, root_dir_size);
+    const int32_t read_blocks = disk_read(volume->disk, root_dir_pos, volume->root_dir_entries, root_dir_size);
     if (read_blocks != (int64_t)root_dir_size) {
         free(volume->root_dir_entries);
         LOG_ERROR("Could not read root directory entries");
@@ -222,23 +249,34 @@ struct volume_t* fat_open(struct disk_t* pdisk, uint32_t first_sector) {
         return NULL;
     }
 
+    const lba_t root_dir_pos = volume->volume_start + volume->disk->VBR->reserved_sectors + volume->disk->VBR->FATs * volume->disk->VBR->sectors_per_FAT;
+    lba_t root_dir_size = (volume->disk->VBR->root_entries * sizeof(Entry_t)) / volume->disk->VBR->bytes_per_sector;
+    root_dir_size += ((volume->disk->VBR->root_entries * sizeof(Entry_t)) % volume->disk->VBR->bytes_per_sector) != 0;
+
+    volume->user_data_pos = root_dir_pos + root_dir_size;
+    volume->entries_amount = 0;
+
+    for (int i = 0; i < MAX_ENTRIES_AMOUNT; i++) {
+        if ('\x0' == (*(volume->root_dir_entries + i)).filename[0]) {
+            volume->entries_amount = i;
+            break;
+        }
+    }
+    volume->entries_amount = !volume->entries_amount ? MAX_ENTRIES_AMOUNT : volume->entries_amount;
+
     return volume;
 }
 
 
 int fat_close(struct volume_t* pvolume) {
-    if (!pvolume || !pvolume->FATs_mem || !pvolume->root_dir_entries || !pvolume->disk) {
+    if (!pvolume || !pvolume->FAT_mem || !pvolume->root_dir_entries || !pvolume->disk) {
         errno = EFAULT;
         LOG_ERROR("Null pointer exception");
         return -1;
     }
 
-    for (int i = 0; i < pvolume->disk->VBR->FATs; i++) {
-        free(pvolume->FATs_mem[i]);
-        pvolume->FATs_mem[i] = NULL;
-    }
-    free(pvolume->FATs_mem);
-    pvolume->FATs_mem = NULL;
+    free(pvolume->FAT_mem);
+    pvolume->FAT_mem = NULL;
 
     free(pvolume->root_dir_entries);
     pvolume->root_dir_entries = NULL;
@@ -248,24 +286,228 @@ int fat_close(struct volume_t* pvolume) {
     return 0;
 }
 
-//TODO: Func to implement
+//TODO: FILE SIZE TO CHECK
+static bool is_dir(const Entry_t * const entry) {
+    return (entry->file_size == 0 && (entry->attributes & DIRECTORY));
+}
+
+
+static void parse_filename(Entry_t const * const entry, char* to) {
+    char filename[FILENAME_LEN + 1] = {0};
+    memcpy(filename, entry->filename, FILENAME_LEN);
+
+    if (!is_dir(entry)) {
+        char extension[EXTENSION_LEN + 1] = {0};
+        memcpy(extension, entry->extension, EXTENSION_LEN);
+        sprintf(to, "%s.%s", strtok(filename, " "), strtok(extension, " "));
+    } else {
+        sprintf(to, "%s", strtok(filename, " "));
+    }
+}
+
+
+static int find_file(const struct volume_t* const pvolume, const char* const file_name) {
+
+    char buffer[FULL_FILENAME_LEN + 1] = {0};
+
+    for (int i = 0; i < pvolume->entries_amount; i++) {
+        if ((pvolume->root_dir_entries[i].attributes & VOLUME_LABEL) || (pvolume->root_dir_entries[i].filename[0] == DELETED)) {
+            continue;
+        }
+
+        parse_filename(pvolume->root_dir_entries + i, buffer);
+        if (strcmp(buffer, file_name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+
 struct file_t* file_open(struct volume_t* pvolume, const char* file_name) {
-    return NULL;
+
+    if (!pvolume || !pvolume->disk || !pvolume->FAT_mem || !file_name) {
+        errno = EFAULT;
+        LOG_ERROR("Null pointer exception");
+        return NULL;
+    }
+
+
+    int file_index = find_file(pvolume, file_name);
+    if (-1 == file_index) {
+        errno = ENOENT;
+        LOG_ERROR("No such file")
+        return NULL;
+    }
+
+    if (is_dir(pvolume->root_dir_entries + file_index)) {
+        errno = EISDIR;
+        LOG_ERROR("It's not a file, it's dir, my dear");
+        return NULL;
+    }
+
+    struct file_t *file = (struct file_t *)calloc(sizeof(struct file_t), 1);
+    if (!file) {
+        errno = ENOMEM;
+        LOG_ERROR("Not enough memory");
+        return NULL;
+    }
+
+    file->entry = pvolume->root_dir_entries + file_index;
+    file->offset = 0;
+    file->is_open = true;
+    file->size = pvolume->root_dir_entries[file_index].file_size;
+    file->start_of_chain = ((cluster_t)pvolume->root_dir_entries[file_index].first_cluster_address_high_order << 16) | pvolume->root_dir_entries[file_index].first_cluster_address_low_order;
+    file->in_volume = pvolume;
+    return file;
 }
 
-//TODO: Func to implement
+
 int file_close(struct file_t* stream) {
+    if (!stream) {
+        errno = EFAULT;
+        LOG_ERROR("Null pointer exception");
+        return -1;
+    }
+    stream->is_open = false;
+    free(stream);
     return 0;
 }
 
-//TODO: Func to implement
+static cluster_t get_next_cluster(const cluster_t after_cluster, const struct volume_t* const from) {
+    if (!from->FAT_mem || after_cluster < 0) return -1;
+    if (after_cluster >= EOC_MARKER_LOW_BOUNDARY) return after_cluster;
+    return from->FAT_mem[after_cluster];
+}
+
+
+static cluster_t get_physical_address(cluster_t cluster, const struct volume_t * const volume) {
+    return volume->user_data_pos + (cluster - 2) * volume->disk->VBR->sectors_per_cluster;
+}
+
+
 size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream) {
-    return 0;
+
+    if (!ptr || !stream) {
+        errno = EFAULT;
+        LOG_ERROR("Null pointer exception");
+        return -1;
+    }
+
+
+    lba_t current_cluster = stream->start_of_chain;
+    lba_t current_cluster_physical = get_physical_address(current_cluster, stream->in_volume);
+
+    lba_t sector_offset = stream->offset / stream->in_volume->disk->VBR->bytes_per_sector;
+    cluster_t cluster_offset = sector_offset / stream->in_volume->disk->VBR->sectors_per_cluster;
+    sector_offset %= stream->in_volume->disk->VBR->sectors_per_cluster;
+
+    lba_t byte_offset = stream->offset % stream->in_volume->disk->VBR->bytes_per_sector;
+
+    long remain_to_read = size * nmemb > stream->size - stream->offset ? (long)(stream->size - stream->offset) : (long)(size * nmemb);
+    long read_bytes = 0, length;
+    char sector_data[SECTOR_SIZE + 1] = {0};
+
+    while (cluster_offset-- != 0) {
+        current_cluster = get_next_cluster(current_cluster, stream->in_volume);
+        current_cluster_physical = get_physical_address(current_cluster, stream->in_volume);
+    }
+
+    while (true) {
+        if (stream->size == stream->offset) return 0;
+
+        int read_blocks = disk_read(stream->in_volume->disk, current_cluster_physical + sector_offset, sector_data, 1);
+        if (read_blocks != 1) {
+            errno = ERANGE;
+            LOG_ERROR("Disk read failed");
+            return -1;
+        }
+
+        bool new_sector = false;
+        if (remain_to_read > SECTOR_SIZE) {
+            length = SECTOR_SIZE;
+            remain_to_read -= length;
+            stream->offset += length;
+            memcpy( (void*) ((uint8_t *)ptr + read_bytes), sector_data + byte_offset, length);
+            sector_offset++;
+            read_bytes += length;
+        } else {
+            int pos_in_sector = (int)stream->offset % SECTOR_SIZE;
+            if (remain_to_read > (SECTOR_SIZE - pos_in_sector)) {
+                length = SECTOR_SIZE - pos_in_sector;
+                remain_to_read -= length;
+                sector_offset++;
+                new_sector = true;
+            } else {
+                length = remain_to_read;
+                remain_to_read = 0;
+            }
+            stream->offset += length;
+            memcpy( (void*) ((uint8_t *)ptr + read_bytes), sector_data + byte_offset, length);
+            read_bytes += length;
+        }
+
+        if (new_sector) byte_offset = 0;
+        if (remain_to_read > 0) {
+            if (sector_offset >= stream->in_volume->disk->VBR->sectors_per_cluster) {
+                current_cluster = get_next_cluster(current_cluster, stream->in_volume);
+                current_cluster_physical = get_physical_address(current_cluster, stream->in_volume);
+                sector_offset = 0;
+            }
+            continue;
+        }
+
+        return read_bytes / size;
+    }
 }
 
-//TODO: Func to implement
+
+
 int32_t file_seek(struct file_t* stream, int32_t offset, int whence) {
-    return 0;
+
+    if (!stream) {
+        errno = EFAULT;
+        LOG_ERROR("Null pointer exception");
+        return -1;
+    }
+
+    bool upper_bound_exceeded = false;
+    bool lower_bound_exceeded = false;
+
+    switch (whence) {
+        case SEEK_SET:
+            upper_bound_exceeded = offset > (int)stream->size;
+            lower_bound_exceeded = offset < 0;
+            break;
+        case SEEK_CUR:
+            upper_bound_exceeded = offset + (int)stream->offset > (int)stream->size;
+            lower_bound_exceeded = offset + (int)stream->offset < 0;
+            break;
+        case SEEK_END:
+            upper_bound_exceeded = offset > 0;
+            lower_bound_exceeded = abs(offset) > (int)stream->size;
+            break;
+        default:
+            errno = EINVAL;
+            LOG_ERROR("Incorrect whence");
+            return -1;
+    }
+
+    if (upper_bound_exceeded || lower_bound_exceeded) {
+        errno = ENXIO;
+        LOG_ERROR("Index out of bounds");
+        return -1;
+    }
+
+    if (whence == SEEK_SET) {
+        stream->offset = offset;
+    } else if (whence == SEEK_CUR) {
+        stream->offset += offset;
+    } else {
+        stream->offset = stream->size + offset;
+    }
+
+    return stream->offset;
 }
 
 //TODO: Func to implement
