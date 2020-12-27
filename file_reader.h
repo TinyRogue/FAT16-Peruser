@@ -5,6 +5,7 @@
 #include <stdlib.h>     /* For malloc() and its family                                          */
 #include <stdint.h>     /* For (u)int(*)_t types                                                */
 #include <stdbool.h>    /* For bool type                                                        */
+#include <ctype.h>
 
 #include <errno.h>      /* For ERRNO and constants                                              */
 #include <string.h>     /* For strerror(), memcmp()                                             */
@@ -108,10 +109,17 @@ typedef struct file_entry_t {
 struct disk_t {
     VBR_t *VBR;
     FILE *disk_file;
-} __attribute__((packed));
+};
+
+struct dir_t {
+    Entry_t *entry;
+    size_t amount;
+    size_t current_dir_entry;
+};
 
 
 struct volume_t {
+    uint8_t **FATs_handler;
     struct disk_t *disk;
     lba_t volume_start;
     lba_t user_data_pos;
@@ -119,7 +127,8 @@ struct volume_t {
     Entry_t *root_dir_entries;
     uint16_t entries_amount;
     uint16_t eoc_marker;
-} __attribute__((packed));
+    struct dir_t root_dir;
+};
 
 
 struct file_t {
@@ -129,15 +138,11 @@ struct file_t {
     bool is_open;
     cluster_t start_of_chain;
     struct volume_t *in_volume;
-} __attribute__((packed));
-
-
-struct dir_t {
-} __attribute__((packed));
+};
 
 
 struct dir_entry_t {
-    char *name;
+    char name[14];
     size_t size;
     bool is_archived;
     bool is_readonly;
