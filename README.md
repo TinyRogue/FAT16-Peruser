@@ -109,7 +109,7 @@ EFAULT - invalid pointer is invalid pointer, ENOMEN - not enough memory, ENOENT 
 ```C
 int file_close(struct file_t* stream);
 ```
-This function, as well as above, does pretty much the same as [fclose()][https://man7.org/linux/man-pages/man3/fclose.3.html].<br/>
+This function, as well as above, does pretty much the same as [fclose()](https://man7.org/linux/man-pages/man3/fclose.3.html).<br/>
 __ReturnValue:__ 0 on success. In case of error returns -1 and sets errno to:
 
 EFAULT - invalid buffer/structure pointer
